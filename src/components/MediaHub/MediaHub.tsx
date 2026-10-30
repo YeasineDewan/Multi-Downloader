@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   MediaAnalysisResult,
   MediaHubCategory,
@@ -16,6 +16,7 @@ import { GallerySubView } from './GallerySubView';
 import { DocumentsSubView } from './DocumentsSubView';
 import { AdvancedOptionsBar } from './AdvancedOptionsBar';
 import { BatchQueueView } from '../BatchQueueView';
+import { RealtimeProgressBar, RealtimeProgressState } from '../RealtimeProgressBar';
 import {
   Play,
   Download,
@@ -104,10 +105,19 @@ export const MediaHub: React.FC<MediaHubProps> = ({
     includeThumbnail: true,
   });
 
-  const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadSpeed, setDownloadSpeed] = useState('');
-  const [downloadComplete, setDownloadComplete] = useState(false);
+  const [downloadState, setDownloadState] = useState<RealtimeProgressState>({
+    status: 'idle',
+    progress: 0,
+    receivedBytes: 0,
+    totalBytes: 0,
+    speed: '',
+    eta: '',
+    filename: '',
+    resolution: '',
+    format: '',
+  });
+
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Group assets
   const allAssets: ScrapedSiteAsset[] = data.allAssets || [];
@@ -144,6 +154,18 @@ export const MediaHub: React.FC<MediaHubProps> = ({
     ? selectedAudio?.estimatedSize || '8.5 MB'
     : selectedVideo?.estimatedSize || '45 MB';
 
+  const currentFormatId = isImage
+    ? 'img-master'
+    : isAudio
+    ? selectedAudio?.id || 'a-320k'
+    : selectedVideo?.id || 'v-1080p';
+
+  const currentStreamUrl = isImage
+    ? data.thumbnail
+    : isAudio
+    ? selectedAudio?.streamUrl || ''
+    : selectedVideo?.streamUrl || '';
+
   const targetDownloadSource = isImage
     ? data.thumbnail
     : data.directMediaUrl || data.url;
@@ -154,61 +176,211 @@ export const MediaHub: React.FC<MediaHubProps> = ({
     currentResolution
   )}&type=${isImage ? 'image' : isAudio ? 'audio' : 'video'}&author=${encodeURIComponent(
     data.author || ''
-  )}`;
+  )}&thumbnail=${encodeURIComponent(data.thumbnail || '')}&duration=${data.durationSec || 0}&size=${encodeURIComponent(
+    currentSize
+  )}&formatId=${encodeURIComponent(currentFormatId)}&streamUrl=${encodeURIComponent(currentStreamUrl)}`;
 
   const currentFilename = `${data.title.replace(/[/\\?%*:|"<>]/g, '_')}${
     isImage ? '_Artwork' : ''
   }.${currentFormat}`;
 
-  // Handle Main Download with immediate browser file transfer
-  const handleDownload = () => {
-    // 1. Immediately trigger the browser download within user gesture to bypass browser popup blockers
-    const anchor = document.createElement('a');
-    anchor.href = currentDownloadUrl;
-    anchor.download = currentFilename;
-    anchor.style.display = 'none';
-    document.body.appendChild(anchor);
-    anchor.click();
-    setTimeout(() => {
-      if (document.body.contains(anchor)) {
-        document.body.removeChild(anchor);
-      }
-    }, 1500);
+  const parseSizeToBytes = (sizeStr: string): number => {
+    if (!sizeStr) return 45 * 1024 * 1024;
+    const match = sizeStr.match(/([\d.]+)\s*(GB|MB|KB|B)/i);
+    if (!match) return 45 * 1024 * 1024;
+    const num = parseFloat(match[1]);
+    const unit = match[2].toUpperCase();
+    if (unit === 'GB') return Math.round(num * 1024 * 1024 * 1024);
+    if (unit === 'MB') return Math.round(num * 1024 * 1024);
+    if (unit === 'KB') return Math.round(num * 1024);
+    return Math.round(num);
+  };
 
-    // 2. Dispatch task to Library and Queue
-    onStartDownload({
-      url: isImage ? data.thumbnail : data.url,
-      title: isImage ? `${data.title} (Artwork)` : data.title,
-      author: data.author,
-      thumbnail: data.thumbnail,
-      platform: data.platform,
-      type: isImage ? 'asset' : isAudio ? 'audio' : 'video',
-      format: currentFormat,
+  const formatByteSize = (bytes: number): string => {
+    if (!bytes || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const clampedI = Math.min(units.length - 1, Math.max(0, i));
+    return `${(bytes / Math.pow(1024, clampedI)).toFixed(1)} ${units[clampedI]}`;
+  };
+
+  // Handle Main Download with live stream byte tracking and real-time progress bar
+  const handleDownload = async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    let expectedTotalBytes = isImage
+      ? 1800000
+      : isAudio
+      ? selectedAudio?.filesizeBytes || parseSizeToBytes(currentSize)
+      : selectedVideo?.filesizeBytes || parseSizeToBytes(currentSize);
+
+    setDownloadState({
+      status: 'downloading',
+      progress: 0,
+      receivedBytes: 0,
+      totalBytes: expectedTotalBytes,
+      speed: 'Connecting...',
+      eta: '--:--',
+      filename: currentFilename,
       resolution: currentResolution,
-      size: currentSize,
-      downloadUrl: currentDownloadUrl,
+      format: currentFormat,
     });
 
-    // 3. Show smooth encoding and transfer progress feedback
-    setDownloading(true);
-    setDownloadProgress(25);
-    setDownloadSpeed('24.2 MB/s');
-    setDownloadComplete(false);
+    const startTime = performance.now();
+    let lastTime = startTime;
+    let lastBytes = 0;
+    const chunks: BlobPart[] = [];
 
-    let progress = 25;
-    const interval = setInterval(() => {
-      progress += 25;
-      if (progress >= 100) {
-        clearInterval(interval);
-        setDownloadProgress(100);
-        setDownloading(false);
-        setDownloadComplete(true);
-      } else {
-        setDownloadProgress(progress);
-        const randomSpeed = (Math.random() * 8 + 20).toFixed(1);
-        setDownloadSpeed(`${randomSpeed} MB/s`);
+    try {
+      const response = await fetch(currentDownloadUrl, {
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Download failed with server status ${response.status}`);
       }
-    }, 150);
+
+      const cl = response.headers.get('content-length');
+      if (cl) {
+        const parsedCl = parseInt(cl, 10);
+        if (!isNaN(parsedCl) && parsedCl > 0) {
+          expectedTotalBytes = parsedCl;
+        }
+      }
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Readable stream not supported by browser.');
+      }
+
+      let receivedBytes = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        chunks.push(value);
+        receivedBytes += value.length;
+
+        const now = performance.now();
+        const elapsedSinceLast = (now - lastTime) / 1000;
+
+        let currentSpeed = '';
+        let currentEta = '';
+        if (elapsedSinceLast >= 0.15) {
+          const deltaBytes = receivedBytes - lastBytes;
+          const bytesPerSec = deltaBytes / elapsedSinceLast;
+          const speedMb = (bytesPerSec / (1024 * 1024)).toFixed(1);
+          currentSpeed = `${speedMb} MB/s`;
+
+          if (bytesPerSec > 0 && expectedTotalBytes > receivedBytes) {
+            const secondsRemaining = Math.max(1, Math.round((expectedTotalBytes - receivedBytes) / bytesPerSec));
+            const mins = Math.floor(secondsRemaining / 60);
+            const secs = secondsRemaining % 60;
+            currentEta = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+          }
+
+          lastTime = now;
+          lastBytes = receivedBytes;
+        }
+
+        const calcProgress = Math.min(
+          99,
+          Math.max(1, Math.round((receivedBytes / Math.max(expectedTotalBytes, receivedBytes)) * 100))
+        );
+
+        setDownloadState((prev) => ({
+          ...prev,
+          progress: calcProgress,
+          receivedBytes,
+          totalBytes: expectedTotalBytes,
+          speed: currentSpeed || prev.speed,
+          eta: currentEta || prev.eta,
+        }));
+      }
+
+      // Assemble final verified file Blob and trigger automatic browser file download
+      const blob = new Blob(chunks, { type: contentType });
+      const blobUrl = window.URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = currentFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      setDownloadState({
+        status: 'completed',
+        progress: 100,
+        receivedBytes,
+        totalBytes: receivedBytes,
+        speed: 'Finished',
+        eta: '00:00',
+        filename: currentFilename,
+        resolution: currentResolution,
+        format: currentFormat,
+        blobUrl,
+      });
+
+      // Dispatch completed task to Library and Queue
+      onStartDownload({
+        url: isImage ? data.thumbnail : data.url,
+        title: isImage ? `${data.title} (Artwork)` : data.title,
+        author: data.author,
+        thumbnail: data.thumbnail,
+        platform: data.platform,
+        type: isImage ? 'asset' : isAudio ? 'audio' : 'video',
+        format: currentFormat,
+        resolution: currentResolution,
+        size: formatByteSize(receivedBytes),
+        downloadUrl: blobUrl,
+      });
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setDownloadState({
+          status: 'idle',
+          progress: 0,
+          receivedBytes: 0,
+          totalBytes: 0,
+          speed: '',
+          eta: '',
+          filename: '',
+          resolution: '',
+          format: '',
+        });
+      } else {
+        console.error('Download stream error:', err);
+        setDownloadState((prev) => ({
+          ...prev,
+          status: 'error',
+          errorMessage: err.message || 'Stream connection interrupted',
+        }));
+      }
+    }
+  };
+
+  const handleCancelDownload = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setDownloadState({
+      status: 'idle',
+      progress: 0,
+      receivedBytes: 0,
+      totalBytes: 0,
+      speed: '',
+      eta: '',
+      filename: '',
+      resolution: '',
+      format: '',
+    });
   };
 
   const handleQueueCurrent = () => {
@@ -423,56 +595,13 @@ export const MediaHub: React.FC<MediaHubProps> = ({
       {/* 5. Master Download Execution Zone */}
       {(activeCategory === 'video' || activeCategory === 'audio' || activeCategory === 'image') && (
         <div className="pt-4 border-t border-white/[0.08] space-y-3">
-          {downloading ? (
-            <div className="p-4 rounded-2xl bg-neutral-950/80 border border-white/10 space-y-2">
-              <div className="flex items-center justify-between text-xs text-neutral-300">
-                <span className="font-semibold text-white">
-                  Downloading{' '}
-                  {activeCategory === 'audio'
-                    ? selectedAudio.label
-                    : activeCategory === 'image'
-                    ? 'Master Artwork (1920×1080 HD)'
-                    : selectedVideo.resolution}...
-                </span>
-                <span className="font-mono tabular-nums">{downloadSpeed} · {downloadProgress}%</span>
-              </div>
-              <div className="w-full h-2.5 bg-neutral-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-indigo-500 transition-all duration-200 rounded-full"
-                  style={{ width: `${downloadProgress}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[11px] text-neutral-500 font-mono">
-                <span>
-                  {activeCategory === 'image'
-                    ? 'Packaging high-resolution image asset'
-                    : 'Encoding stream container'}
-                </span>
-                <span>ETA: ~00:03</span>
-              </div>
-            </div>
-          ) : downloadComplete ? (
-            <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-emerald-200">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="font-semibold">Media file download started! Saved to your Library.</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <a
-                  href={currentDownloadUrl}
-                  download={currentFilename}
-                  className="underline text-emerald-300 hover:text-white font-medium"
-                >
-                  Direct Link
-                </a>
-                <button
-                  onClick={handleDownload}
-                  className="px-3 py-1 bg-emerald-600/30 hover:bg-emerald-600/50 rounded-lg text-emerald-100 transition-colors"
-                >
-                  Download Again
-                </button>
-              </div>
-            </div>
+          {downloadState.status !== 'idle' ? (
+            <RealtimeProgressBar
+              state={downloadState}
+              onCancel={handleCancelDownload}
+              onRetry={handleDownload}
+              onPreview={() => onPreviewMedia(data)}
+            />
           ) : (
             <button
               onClick={handleDownload}

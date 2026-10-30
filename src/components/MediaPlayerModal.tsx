@@ -32,57 +32,61 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ media, onClo
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  if (!media) return null;
+  const title = media?.title || '';
+  const author = media?.author || '';
+  const thumbnail = media?.thumbnail || '';
 
-  const title = media.title;
-  const author = media.author;
-  const thumbnail = media.thumbnail;
-
-  // Detect platform & embed IDs
-  const rawUrl = media.url || '';
-  const isYouTube =
+  // Detect platform & embed IDs safely
+  const rawUrl = media?.url || '';
+  const isYouTube = Boolean(
     rawUrl.includes('youtube.com') ||
     rawUrl.includes('youtu.be') ||
-    ('platform' in media && media.platform?.id === 'youtube');
+    (media && 'platform' in media && media.platform?.id === 'youtube')
+  );
 
   const youtubeVideoId = useMemo(() => {
-    if (!isYouTube) return null;
+    if (!isYouTube || !rawUrl) return null;
     const match = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/);
     return match ? match[1] : null;
   }, [rawUrl, isYouTube]);
 
-  const isSpotify =
+  const isSpotify = Boolean(
     rawUrl.includes('spotify.com') ||
-    ('platform' in media && media.platform?.id === 'spotify');
+    (media && 'platform' in media && media.platform?.id === 'spotify')
+  );
 
   const spotifyTrackId = useMemo(() => {
-    if (!isSpotify) return null;
+    if (!isSpotify || !rawUrl) return null;
     const match = rawUrl.match(/track\/([a-zA-Z0-9]+)/);
     return match ? match[1] : null;
   }, [rawUrl, isSpotify]);
 
-  const isVimeo =
+  const isVimeo = Boolean(
     rawUrl.includes('vimeo.com') ||
-    ('platform' in media && media.platform?.id === 'vimeo');
+    (media && 'platform' in media && media.platform?.id === 'vimeo')
+  );
 
   const vimeoId = useMemo(() => {
-    if (!isVimeo) return null;
+    if (!isVimeo || !rawUrl) return null;
     const match = rawUrl.match(/vimeo\.com\/(?:channels\/(?:\w+\/)?|groups\/([^\/]*)\/videos\/|album\/(\d+)\/video\/|video\/|)(\d+)/);
     return match ? match[3] : null;
   }, [rawUrl, isVimeo]);
 
-  const isSoundCloud =
+  const isSoundCloud = Boolean(
     rawUrl.includes('soundcloud.com') ||
-    ('platform' in media && media.platform?.id === 'soundcloud');
+    (media && 'platform' in media && media.platform?.id === 'soundcloud')
+  );
 
-  const isAudioOnly =
-    ('type' in media && media.type === 'audio') ||
+  const isAudioOnly = Boolean(
+    (media && 'type' in media && media.type === 'audio') ||
     isSpotify ||
     isSoundCloud ||
-    title.toLowerCase().includes('audio');
+    title.toLowerCase().includes('audio')
+  );
 
   // Compute embed URL if available
   const nativeEmbedUrl = useMemo(() => {
+    if (!media) return null;
     if ('embedUrl' in media && media.embedUrl) {
       return media.embedUrl;
     }
@@ -104,13 +108,17 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ media, onClo
   const hasNativeEmbed = Boolean(nativeEmbedUrl);
 
   // Fallback direct stream URL
-  const baseStreamUrl =
-    ('directMediaUrl' in media && media.directMediaUrl) ||
-    ('downloadUrl' in media && media.downloadUrl) ||
-    (rawUrl && !isYouTube && !isSpotify && !isVimeo && !isSoundCloud ? rawUrl : '') ||
-    (isAudioOnly
-      ? '/api/download?format=wav&title=AudioPreview'
-      : '/api/download?format=mp4&title=VideoPreview');
+  const baseStreamUrl = useMemo(() => {
+    if (!media) return '';
+    return (
+      ('directMediaUrl' in media && media.directMediaUrl) ||
+      ('downloadUrl' in media && media.downloadUrl) ||
+      (rawUrl && !isYouTube && !isSpotify && !isVimeo && !isSoundCloud ? rawUrl : '') ||
+      (isAudioOnly
+        ? '/api/download?format=wav&title=AudioPreview'
+        : '/api/download?format=mp4&title=VideoPreview')
+    );
+  }, [media, rawUrl, isYouTube, isSpotify, isVimeo, isSoundCloud, isAudioOnly]);
 
   const directStreamUrl = useProxy
     ? `/api/proxy-media?url=${encodeURIComponent(baseStreamUrl)}`
@@ -118,6 +126,7 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ media, onClo
 
   // Sync play/pause with DOM element in stream mode
   useEffect(() => {
+    if (!media) return;
     if (hasNativeEmbed && viewMode === 'embed') return;
     const el = isAudioOnly ? audioRef.current : videoRef.current;
     if (!el) return;
@@ -128,14 +137,15 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ media, onClo
     } else {
       el.pause();
     }
-  }, [isPlaying, isAudioOnly, directStreamUrl, viewMode, hasNativeEmbed]);
+  }, [media, isPlaying, isAudioOnly, directStreamUrl, viewMode, hasNativeEmbed]);
 
   // Sync volume with DOM element
   useEffect(() => {
+    if (!media) return;
     const el = isAudioOnly ? audioRef.current : videoRef.current;
     if (!el) return;
     el.volume = isMuted ? 0 : volume / 100;
-  }, [volume, isMuted, isAudioOnly]);
+  }, [media, volume, isMuted, isAudioOnly]);
 
   const handleTimeUpdate = () => {
     const el = isAudioOnly ? audioRef.current : videoRef.current;
@@ -164,6 +174,9 @@ export const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ media, onClo
     const s = Math.floor(sec % 60);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  // Safe early exit AFTER all hooks are called
+  if (!media) return null;
 
   const downloadTargetUrl =
     ('directMediaUrl' in media && media.directMediaUrl) || media.url;

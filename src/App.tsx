@@ -478,7 +478,9 @@ export default function App() {
       </footer>
 
       {/* Modals */}
-      <MediaPlayerModal media={previewMedia} onClose={() => setPreviewMedia(null)} />
+      {previewMedia && (
+        <MediaPlayerModal media={previewMedia} onClose={() => setPreviewMedia(null)} />
+      )}
 
       <SettingsModal
         isOpen={isSettingsOpen}

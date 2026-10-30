@@ -16,6 +16,9 @@ export interface VideoFormatOption {
   bitrate: string;
   hdr?: boolean;
   recommended?: boolean;
+  streamUrl?: string;
+  formatId?: string;
+  filesizeBytes?: number;
 }
 
 export interface AudioFormatOption {
@@ -27,6 +30,9 @@ export interface AudioFormatOption {
   estimatedSize: string;
   description: string;
   recommended?: boolean;
+  streamUrl?: string;
+  formatId?: string;
+  filesizeBytes?: number;
 }
 
 export interface SubtitleOption {
