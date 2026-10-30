@@ -53,6 +53,8 @@ export interface MediaAnalysisResult {
   durationSec: number;
   durationFormatted: string;
   directMediaUrl?: string;
+  embedUrl?: string;
+  mediaType?: 'video' | 'audio' | 'image' | 'document';
   videoFormats: VideoFormatOption[];
   audioFormats: AudioFormatOption[];
   subtitles: SubtitleOption[];

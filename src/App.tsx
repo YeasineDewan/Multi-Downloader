@@ -299,7 +299,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0A0B0E] text-[#EDEDF0] flex flex-col font-sans selection:bg-neutral-700 selection:text-white">
-      {/* iOS 18 Streamlined Header */}
+      {/* iOS 18 Streamlined Header with Global Queue Progress */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -307,6 +307,7 @@ export default function App() {
         onQuickPaste={handleQuickPaste}
         batchCount={queue.length}
         libraryCount={library.length}
+        queue={queue}
       />
 
       {/* Hero Header & Dynamic URL Island */}

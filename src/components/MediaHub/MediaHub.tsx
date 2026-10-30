@@ -56,11 +56,38 @@ export const MediaHub: React.FC<MediaHubProps> = ({
   const [activeCategory, setActiveCategory] = useState<MediaHubCategory>('video');
 
   const [selectedVideo, setSelectedVideo] = useState<VideoFormatOption>(
-    data.videoFormats.find((v) => v.recommended) || data.videoFormats[2] || data.videoFormats[0]
+    data.videoFormats?.find((v) => v.recommended) || data.videoFormats?.[0] || {
+      id: 'v-1080p',
+      label: 'Full HD 1080p',
+      resolution: '1080p',
+      fps: 60,
+      container: 'MP4',
+      codec: 'H.264',
+      estimatedSize: '45 MB',
+      bitrate: '8 Mbps',
+    }
   );
   const [selectedAudio, setSelectedAudio] = useState<AudioFormatOption>(
-    data.audioFormats.find((a) => a.recommended) || data.audioFormats[0]
+    data.audioFormats?.find((a) => a.recommended) || data.audioFormats?.[0] || {
+      id: 'a-320k',
+      label: 'Master Studio MP3',
+      quality: '320 kbps',
+      sampleRate: '48.0 kHz',
+      container: 'MP3',
+      estimatedSize: '8.5 MB',
+      description: 'Maximum MP3 fidelity with full ID3v2 tags',
+    }
   );
+
+  // Synchronize formats whenever data changes (e.g. after a new analysis)
+  React.useEffect(() => {
+    if (data.videoFormats && data.videoFormats.length > 0) {
+      setSelectedVideo(data.videoFormats.find((v) => v.recommended) || data.videoFormats[0]);
+    }
+    if (data.audioFormats && data.audioFormats.length > 0) {
+      setSelectedAudio(data.audioFormats.find((a) => a.recommended) || data.audioFormats[0]);
+    }
+  }, [data]);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedSettings, setAdvancedSettings] = useState<AdvancedDownloadSettings>({
@@ -93,88 +120,95 @@ export const MediaHub: React.FC<MediaHubProps> = ({
   // Total image count including master artwork thumbnail
   const totalImageCount = Math.max(1, imageAssets.length + (data.thumbnail ? 1 : 0));
 
-  // Handle Main Download
+  // Determine current download target parameters
+  const isAudio = activeCategory === 'audio';
+  const isImage = activeCategory === 'image' || activeCategory === 'gallery';
+
+  const currentFormat = isImage
+    ? 'jpg'
+    : isAudio
+    ? selectedAudio?.container?.toLowerCase() || 'mp3'
+    : advancedSettings.convertToGif
+    ? 'gif'
+    : selectedVideo?.container?.toLowerCase() || 'mp4';
+
+  const currentResolution = isImage
+    ? '1920x1080'
+    : isAudio
+    ? selectedAudio?.quality || '320 kbps'
+    : selectedVideo?.resolution || '1080p';
+
+  const currentSize = isImage
+    ? '1.8 MB'
+    : isAudio
+    ? selectedAudio?.estimatedSize || '8.5 MB'
+    : selectedVideo?.estimatedSize || '45 MB';
+
+  const targetDownloadSource = isImage
+    ? data.thumbnail
+    : data.directMediaUrl || data.url;
+
+  const currentDownloadUrl = `/api/download?url=${encodeURIComponent(
+    targetDownloadSource
+  )}&title=${encodeURIComponent(data.title)}&format=${currentFormat}&resolution=${encodeURIComponent(
+    currentResolution
+  )}&type=${isImage ? 'image' : isAudio ? 'audio' : 'video'}&author=${encodeURIComponent(
+    data.author || ''
+  )}`;
+
+  const currentFilename = `${data.title.replace(/[/\\?%*:|"<>]/g, '_')}${
+    isImage ? '_Artwork' : ''
+  }.${currentFormat}`;
+
+  // Handle Main Download with immediate browser file transfer
   const handleDownload = () => {
-    if (downloading) return;
+    // 1. Immediately trigger the browser download within user gesture to bypass browser popup blockers
+    const anchor = document.createElement('a');
+    anchor.href = currentDownloadUrl;
+    anchor.download = currentFilename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+      if (document.body.contains(anchor)) {
+        document.body.removeChild(anchor);
+      }
+    }, 1500);
+
+    // 2. Dispatch task to Library and Queue
+    onStartDownload({
+      url: isImage ? data.thumbnail : data.url,
+      title: isImage ? `${data.title} (Artwork)` : data.title,
+      author: data.author,
+      thumbnail: data.thumbnail,
+      platform: data.platform,
+      type: isImage ? 'asset' : isAudio ? 'audio' : 'video',
+      format: currentFormat,
+      resolution: currentResolution,
+      size: currentSize,
+      downloadUrl: currentDownloadUrl,
+    });
+
+    // 3. Show smooth encoding and transfer progress feedback
     setDownloading(true);
-    setDownloadProgress(0);
-    setDownloadSpeed('18.5 MB/s');
+    setDownloadProgress(25);
+    setDownloadSpeed('24.2 MB/s');
     setDownloadComplete(false);
 
-    const isAudio = activeCategory === 'audio';
-    const isImage = activeCategory === 'image' || activeCategory === 'gallery';
-
-    const format = isImage
-      ? 'jpg'
-      : isAudio
-      ? selectedAudio.container.toLowerCase()
-      : advancedSettings.convertToGif
-      ? 'gif'
-      : selectedVideo.container.toLowerCase();
-
-    const size = isImage
-      ? '1.8 MB'
-      : isAudio
-      ? selectedAudio.estimatedSize
-      : selectedVideo.estimatedSize;
-
-    const resolution = isImage
-      ? '1920x1080'
-      : isAudio
-      ? selectedAudio.quality
-      : selectedVideo.resolution;
-
-    let current = 0;
+    let progress = 25;
     const interval = setInterval(() => {
-      current += Math.floor(Math.random() * 15) + 12;
-      if (current >= 100) {
-        current = 100;
+      progress += 25;
+      if (progress >= 100) {
         clearInterval(interval);
         setDownloadProgress(100);
         setDownloading(false);
         setDownloadComplete(true);
-
-        const targetDownloadSource = isImage
-          ? data.thumbnail
-          : data.directMediaUrl || data.url;
-
-        const downloadUrl = `/api/download?url=${encodeURIComponent(
-          targetDownloadSource
-        )}&title=${encodeURIComponent(data.title)}&format=${format}&resolution=${encodeURIComponent(
-          resolution
-        )}&type=${isImage ? 'image' : isAudio ? 'audio' : 'video'}&author=${encodeURIComponent(
-          data.author || ''
-        )}`;
-
-        const anchor = document.createElement('a');
-        anchor.href = downloadUrl;
-        anchor.download = `${data.title.replace(/[/\\?%*:|"<>]/g, '_')}${
-          isImage ? '_Artwork' : ''
-        }.${format}`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-
-        onStartDownload({
-          url: isImage ? data.thumbnail : data.url,
-          title: isImage ? `${data.title} (Artwork)` : data.title,
-          author: data.author,
-          thumbnail: data.thumbnail,
-          platform: data.platform,
-          type: isImage ? 'asset' : isAudio ? 'audio' : 'video',
-          format,
-          resolution,
-          size,
-          downloadUrl,
-        });
-
-        setTimeout(() => setDownloadComplete(false), 5000);
       } else {
-        setDownloadProgress(current);
-        const randomSpeed = (Math.random() * 8 + 18).toFixed(1);
+        setDownloadProgress(progress);
+        const randomSpeed = (Math.random() * 8 + 20).toFixed(1);
         setDownloadSpeed(`${randomSpeed} MB/s`);
       }
-    }, 180);
+    }, 150);
   };
 
   const handleQueueCurrent = () => {
@@ -418,22 +452,31 @@ export const MediaHub: React.FC<MediaHubProps> = ({
               </div>
             </div>
           ) : downloadComplete ? (
-            <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-200">
+            <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-emerald-200">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span className="font-semibold">Media downloaded successfully! Added to your Library.</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-semibold">Media file download started! Saved to your Library.</span>
               </div>
-              <button
-                onClick={handleDownload}
-                className="px-3 py-1 bg-emerald-600/30 hover:bg-emerald-600/50 rounded-lg text-emerald-100 transition-colors"
-              >
-                Download Again
-              </button>
+              <div className="flex items-center gap-3">
+                <a
+                  href={currentDownloadUrl}
+                  download={currentFilename}
+                  className="underline text-emerald-300 hover:text-white font-medium"
+                >
+                  Direct Link
+                </a>
+                <button
+                  onClick={handleDownload}
+                  className="px-3 py-1 bg-emerald-600/30 hover:bg-emerald-600/50 rounded-lg text-emerald-100 transition-colors"
+                >
+                  Download Again
+                </button>
+              </div>
             </div>
           ) : (
             <button
               onClick={handleDownload}
-              className="w-full py-4 rounded-2xl bg-white hover:bg-neutral-100 text-black font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] shadow-xl shadow-white/10"
+              className="w-full py-4 rounded-2xl bg-white hover:bg-neutral-100 text-black font-bold text-sm sm:text-base flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] shadow-xl shadow-white/10 cursor-pointer"
             >
               <Download className="w-5 h-5" />
               <span>
@@ -441,8 +484,8 @@ export const MediaHub: React.FC<MediaHubProps> = ({
                 {activeCategory === 'image'
                   ? 'Master Artwork & Cover (1920×1080 HD JPG · 1.8 MB)'
                   : activeCategory === 'audio'
-                  ? `${selectedAudio.quality} ${selectedAudio.container} (${selectedAudio.estimatedSize})`
-                  : `${selectedVideo.resolution} ${selectedVideo.container} (${selectedVideo.estimatedSize})`}
+                  ? `${selectedAudio?.quality || '320 kbps'} ${selectedAudio?.container || 'MP3'} (${currentSize})`
+                  : `${selectedVideo?.resolution || '1080p'} ${selectedVideo?.container || 'MP4'} (${currentSize})`}
               </span>
             </button>
           )}
