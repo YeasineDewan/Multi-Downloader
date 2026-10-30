@@ -1,0 +1,6 @@
+{
+  "name": "Downloader",
+  "description": "Next-generation universal media downloader with multi-resolution video, studio audio extraction, and web asset fetching in an Apple-inspired iOS dark design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

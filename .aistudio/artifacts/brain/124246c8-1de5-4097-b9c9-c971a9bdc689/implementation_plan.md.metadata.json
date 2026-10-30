@@ -1,0 +1,6 @@
+{
+  "summary": "Architectural plan for Downloader: fixing data fetching across platforms with a multi-engine fallback, introducing a unified Category and Subcategory Media Hub component to eliminate code duplication, and elevating the UI/UX with iOS 18 frosted glass aesthetics.",
+  "updatedAt": "2026-10-13T18:00:45.328620460Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
