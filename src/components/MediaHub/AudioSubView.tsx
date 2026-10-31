@@ -7,6 +7,7 @@ interface AudioSubViewProps {
   selectedFormat: AudioFormatOption;
   onSelectFormat: (format: AudioFormatOption) => void;
   onPreviewAudio?: () => void;
+  optimalFormatId?: string;
 }
 
 export const AudioSubView: React.FC<AudioSubViewProps> = ({
@@ -14,6 +15,7 @@ export const AudioSubView: React.FC<AudioSubViewProps> = ({
   selectedFormat,
   onSelectFormat,
   onPreviewAudio,
+  optimalFormatId,
 }) => {
   return (
     <div className="space-y-6 animate-fade-in">
@@ -52,6 +54,8 @@ export const AudioSubView: React.FC<AudioSubViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {formats.map((item) => {
             const isSelected = selectedFormat.id === item.id;
+            const isOptimal = optimalFormatId ? item.id === optimalFormatId : item.recommended;
+
             return (
               <button
                 key={item.id}
@@ -59,13 +63,23 @@ export const AudioSubView: React.FC<AudioSubViewProps> = ({
                 className={`p-4 rounded-2xl text-left border transition-all duration-200 flex flex-col justify-between relative group ${
                   isSelected
                     ? 'bg-neutral-800/90 border-emerald-500/50 shadow-lg ring-1 ring-emerald-500/30'
+                    : isOptimal
+                    ? 'bg-neutral-950/70 border-emerald-500/30 ring-1 ring-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.12)] hover:bg-neutral-900/70 hover:border-emerald-400/40 animate-[pulse_4s_cubic-bezier(0.4,0,0.6,1)_infinite]'
                     : 'bg-neutral-950/50 border-white/[0.06] hover:bg-neutral-900/60 hover:border-white/15'
                 }`}
               >
                 <div className="flex items-center justify-between w-full mb-1">
-                  <span className="text-sm font-bold text-white tracking-tight">
-                    {item.label}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white tracking-tight">
+                      {item.label}
+                    </span>
+                    {isOptimal && (
+                      <span className="text-[10px] font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30 flex items-center gap-1 shadow-sm animate-pulse">
+                        <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+                        <span>Recommended</span>
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs font-mono font-medium text-neutral-300 tabular-nums">
                     {item.estimatedSize}
                   </span>
@@ -75,7 +89,7 @@ export const AudioSubView: React.FC<AudioSubViewProps> = ({
                   <span>
                     {item.container} · {item.quality} · {item.sampleRate}
                   </span>
-                  {item.recommended && (
+                  {item.recommended && !isOptimal && (
                     <span className="text-[11px] text-emerald-400 font-sans font-semibold">
                       Recommended
                     </span>

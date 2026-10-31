@@ -35,6 +35,25 @@
             return true;
           }
         }, true);
+
+        // Filter benign Vite HMR websocket reconnection noise in cloud preview containers
+        var origWarn = console.warn;
+        console.warn = function() {
+          var msg = arguments[0] ? String(arguments[0]) : '';
+          if (msg.indexOf('failed to connect to websocket') !== -1 || msg.indexOf('WebSocket') !== -1) {
+            return;
+          }
+          return origWarn.apply(console, arguments);
+        };
+
+        var origError = console.error;
+        console.error = function() {
+          var msg = arguments[0] ? String(arguments[0]) : '';
+          if (msg.indexOf('failed to connect to websocket') !== -1 || msg.indexOf('WebSocket closed') !== -1) {
+            return;
+          }
+          return origError.apply(console, arguments);
+        };
       })();
     </script>
     <title>Downloader</title>

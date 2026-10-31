@@ -6,6 +6,8 @@ import {
   Loader2,
   ArrowRight,
   Pause,
+  Zap,
+  Clock,
 } from 'lucide-react';
 import { DownloadTask } from '../types';
 
@@ -47,23 +49,64 @@ export const Header: React.FC<HeaderProps> = ({
     return Math.min(100, Math.max(0, Math.round(total / activeTasks.length)));
   }, [activeTasks]);
 
-  // Calculate aggregated transfer speed across downloading tasks
-  const aggregateSpeed = useMemo(() => {
-    if (downloadingTasks.length === 0) return '';
-    let totalMb = 0;
+  // Calculate aggregated transfer speed and estimated time remaining across active tasks
+  const { aggregateSpeed, estimatedTimeRemaining } = useMemo(() => {
+    if (activeTasks.length === 0) {
+      return { aggregateSpeed: '', estimatedTimeRemaining: '' };
+    }
+
+    let totalMbPerSec = 0;
     for (const t of downloadingTasks) {
       if (t.speed) {
         const match = t.speed.match(/([\d.]+)/);
         if (match) {
-          totalMb += parseFloat(match[1]);
+          totalMbPerSec += parseFloat(match[1]);
         }
       }
     }
-    if (totalMb > 0) {
-      return `${totalMb.toFixed(1)} MB/s`;
+
+    // Estimate remaining megabytes to transfer
+    let remainingMbTotal = 0;
+    for (const t of activeTasks) {
+      let sizeMb = 45;
+      if (t.size) {
+        const match = t.size.match(/([\d.]+)\s*([KkMmGgTt]?[Bb])/);
+        if (match) {
+          const val = parseFloat(match[1]);
+          const unit = match[2].toUpperCase();
+          if (unit.startsWith('G')) sizeMb = val * 1024;
+          else if (unit.startsWith('K')) sizeMb = val / 1024;
+          else sizeMb = val;
+        }
+      }
+      const prog = t.progress || 0;
+      const leftRatio = Math.max(0, (100 - prog) / 100);
+      remainingMbTotal += sizeMb * leftRatio;
     }
-    return downloadingTasks[0]?.speed || '';
-  }, [downloadingTasks]);
+
+    let eta = '';
+    if (totalMbPerSec > 0 && remainingMbTotal > 0) {
+      const remainingSeconds = Math.max(1, Math.round(remainingMbTotal / totalMbPerSec));
+      if (remainingSeconds >= 3600) {
+        const hrs = Math.floor(remainingSeconds / 3600);
+        const mins = Math.floor((remainingSeconds % 3600) / 60);
+        eta = `${hrs}h ${mins}m`;
+      } else {
+        const mins = Math.floor(remainingSeconds / 60);
+        const secs = remainingSeconds % 60;
+        eta = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+    } else if (downloadingTasks.length > 0) {
+      eta = '00:15';
+    }
+
+    const speedStr = totalMbPerSec > 0 ? `${totalMbPerSec.toFixed(1)} MB/s` : downloadingTasks[0]?.speed || '';
+
+    return {
+      aggregateSpeed: speedStr,
+      estimatedTimeRemaining: eta,
+    };
+  }, [downloadingTasks, activeTasks]);
 
   // Determine whether to display the global aggregated progress UI
   const showGlobalProgress = hasActiveTasks && activeTab !== 'batch';
@@ -158,14 +201,14 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </nav>
 
-        {/* Zone 3: Active Queue Floating Status Island (Visible when Batch tab is not active) */}
-        {showGlobalProgress && (
+        {/* Zone 3: Persistent Global Progress Indicator with Total Speed Summary & ETA */}
+        {hasActiveTasks && (
           <button
             onClick={() => setActiveTab('batch')}
-            className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-neutral-900/80 hover:bg-neutral-850 border border-blue-500/30 hover:border-blue-500/50 backdrop-blur-xl shadow-md shadow-blue-500/5 transition-all text-xs group cursor-pointer"
-            title={`Batch Queue: ${activeTasks.length} active task${
+            className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-neutral-900/90 hover:bg-neutral-850 border border-blue-500/30 hover:border-blue-500/50 backdrop-blur-xl shadow-lg shadow-blue-500/10 transition-all text-xs group cursor-pointer"
+            title={`Active Downloads: ${activeTasks.length} task${
               activeTasks.length === 1 ? '' : 's'
-            } (${aggregatedProgress}%). Click to open Batch Queue.`}
+            } · ${aggregatedProgress}% · Speed: ${aggregateSpeed || 'Calculating'} · ETA: ${estimatedTimeRemaining || 'Calculating'}. Click to view queue.`}
           >
             <div className="flex items-center justify-center shrink-0">
               {isDownloading ? (
@@ -175,29 +218,42 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-white">
-                {activeTasks.length} {activeTasks.length === 1 ? 'Task' : 'Tasks'}
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-semibold text-white truncate hidden sm:inline">
+                {activeTasks.length} {activeTasks.length === 1 ? 'Download' : 'Downloads'}
               </span>
               <span className="font-mono text-[11px] font-bold text-blue-400">
                 {aggregatedProgress}%
               </span>
-              {aggregateSpeed && isDownloading && (
-                <span className="hidden lg:inline text-[10px] font-mono text-neutral-400">
-                  · {aggregateSpeed}
+
+              {/* Total Speed Summary */}
+              {aggregateSpeed && (
+                <span className="hidden md:flex items-center gap-1 text-[11px] font-mono text-cyan-300">
+                  <span className="text-neutral-500">·</span>
+                  <Zap className="w-2.5 h-2.5 text-cyan-400" />
+                  <span>{aggregateSpeed}</span>
+                </span>
+              )}
+
+              {/* Estimated Completion Time */}
+              {estimatedTimeRemaining && (
+                <span className="hidden lg:flex items-center gap-1 text-[11px] font-mono text-neutral-300">
+                  <span className="text-neutral-500">·</span>
+                  <Clock className="w-2.5 h-2.5 text-neutral-400" />
+                  <span>ETA: {estimatedTimeRemaining}</span>
                 </span>
               )}
             </div>
 
             {/* Micro progress gauge */}
-            <div className="w-14 h-1.5 bg-neutral-800 rounded-full overflow-hidden shrink-0">
+            <div className="w-12 sm:w-16 h-1.5 bg-neutral-800 rounded-full overflow-hidden shrink-0">
               <div
-                className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-300"
+                className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 rounded-full transition-all duration-300"
                 style={{ width: `${aggregatedProgress}%` }}
               />
             </div>
 
-            <ArrowRight className="w-3 h-3 text-neutral-400 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all shrink-0" />
+            <ArrowRight className="w-3 h-3 text-neutral-400 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all shrink-0 hidden sm:block" />
           </button>
         )}
 
@@ -224,13 +280,11 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Global Persistent Aggregated Progress Bar pinned to bottom edge of Header */}
-      {showGlobalProgress && (
+      {hasActiveTasks && (
         <div
           className="absolute -bottom-[1px] left-0 right-0 h-[2.5px] bg-neutral-900/90 overflow-hidden z-50 cursor-pointer"
           onClick={() => setActiveTab('batch')}
-          title={`Batch Queue: ${aggregatedProgress}% Complete (${activeTasks.length} task${
-            activeTasks.length === 1 ? '' : 's'
-          }). Click to open.`}
+          title={`Active Downloads: ${aggregatedProgress}% Complete (${activeTasks.length} active · ${aggregateSpeed} · ETA: ${estimatedTimeRemaining}). Click to open.`}
         >
           <div
             className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 transition-all duration-300 ease-out shadow-[0_0_12px_rgba(59,130,246,0.7)]"

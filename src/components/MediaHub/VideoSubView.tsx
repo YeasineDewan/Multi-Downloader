@@ -8,6 +8,7 @@ interface VideoSubViewProps {
   onSelectFormat: (format: VideoFormatOption) => void;
   subtitles: SubtitleOption[];
   mediaTitle: string;
+  optimalFormatId?: string;
 }
 
 export const VideoSubView: React.FC<VideoSubViewProps> = ({
@@ -16,6 +17,7 @@ export const VideoSubView: React.FC<VideoSubViewProps> = ({
   onSelectFormat,
   subtitles,
   mediaTitle,
+  optimalFormatId,
 }) => {
   return (
     <div className="space-y-6 animate-fade-in">
@@ -29,6 +31,8 @@ export const VideoSubView: React.FC<VideoSubViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {formats.map((item) => {
             const isSelected = selectedFormat.id === item.id;
+            const isOptimal = optimalFormatId ? item.id === optimalFormatId : item.recommended;
+
             return (
               <button
                 key={item.id}
@@ -36,14 +40,22 @@ export const VideoSubView: React.FC<VideoSubViewProps> = ({
                 className={`p-4 rounded-2xl text-left border transition-all duration-200 flex flex-col justify-between relative group ${
                   isSelected
                     ? 'bg-neutral-800/90 border-blue-500/50 shadow-lg ring-1 ring-blue-500/30'
+                    : isOptimal
+                    ? 'bg-neutral-950/70 border-blue-500/30 ring-1 ring-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.12)] hover:bg-neutral-900/70 hover:border-blue-400/40 animate-[pulse_4s_cubic-bezier(0.4,0,0.6,1)_infinite]'
                     : 'bg-neutral-950/50 border-white/[0.06] hover:bg-neutral-900/60 hover:border-white/15'
                 }`}
               >
                 <div className="flex items-center justify-between w-full mb-1.5">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-base font-bold text-white tracking-tight">
                       {item.resolution}
                     </span>
+                    {isOptimal && (
+                      <span className="text-[10px] font-semibold text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full border border-blue-400/30 flex items-center gap-1 shadow-sm animate-pulse">
+                        <Sparkles className="w-2.5 h-2.5 text-blue-400" />
+                        <span>Recommended</span>
+                      </span>
+                    )}
                     {item.hdr && (
                       <span className="text-[10px] font-semibold text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
                         HDR 10-Bit
@@ -59,7 +71,7 @@ export const VideoSubView: React.FC<VideoSubViewProps> = ({
                   <span>
                     {item.container} · {item.fps}fps · {item.bitrate}
                   </span>
-                  {item.recommended && (
+                  {item.recommended && !isOptimal && (
                     <span className="text-[11px] text-blue-400 font-sans font-semibold">
                       Recommended
                     </span>

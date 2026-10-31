@@ -17,6 +17,7 @@ import { DocumentsSubView } from './DocumentsSubView';
 import { AdvancedOptionsBar } from './AdvancedOptionsBar';
 import { BatchQueueView } from '../BatchQueueView';
 import { RealtimeProgressBar, RealtimeProgressState } from '../RealtimeProgressBar';
+import { FormatComparisonTable } from './FormatComparisonTable';
 import {
   Play,
   Download,
@@ -30,6 +31,55 @@ import {
   Sparkles,
   Image as ImageIcon,
 } from 'lucide-react';
+
+// Smart Format Picker: Evaluates stream metadata to select the highest available bitrate / resolution
+function getOptimalVideoFormat(formats: VideoFormatOption[]): VideoFormatOption | null {
+  if (!formats || formats.length === 0) return null;
+  return [...formats].sort((a, b) => {
+    const parseHeight = (res: string) => {
+      const match = res.match(/(\d{3,4})/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    const parseBitrate = (bitrate: string) => {
+      const match = bitrate.match(/([\d.]+)/);
+      const val = match ? parseFloat(match[1]) : 0;
+      if (bitrate.toLowerCase().includes('mbps')) return val * 1000;
+      return val;
+    };
+
+    const hA = parseHeight(a.resolution);
+    const hB = parseHeight(b.resolution);
+    if (hA !== hB) return hB - hA;
+
+    const bA = parseBitrate(a.bitrate);
+    const bB = parseBitrate(b.bitrate);
+    if (bA !== bB) return bB - bA;
+
+    const fpsA = a.fps || 30;
+    const fpsB = b.fps || 30;
+    if (fpsA !== fpsB) return fpsB - fpsA;
+
+    if (a.hdr && !b.hdr) return -1;
+    if (!a.hdr && b.hdr) return 1;
+
+    return 0;
+  })[0];
+}
+
+function getOptimalAudioFormat(formats: AudioFormatOption[]): AudioFormatOption | null {
+  if (!formats || formats.length === 0) return null;
+  return [...formats].sort((a, b) => {
+    const parseQuality = (q: string) => {
+      if (q.toLowerCase().includes('lossless') || q.toLowerCase().includes('flac')) return 2000;
+      if (q.toLowerCase().includes('pcm') || q.toLowerCase().includes('wav')) return 1411;
+      const match = q.match(/(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    const qA = parseQuality(a.quality);
+    const qB = parseQuality(b.quality);
+    return qB - qA;
+  })[0];
+}
 
 interface MediaHubProps {
   data: MediaAnalysisResult;
@@ -56,8 +106,12 @@ export const MediaHub: React.FC<MediaHubProps> = ({
 }) => {
   const [activeCategory, setActiveCategory] = useState<MediaHubCategory>('video');
 
+  // Smart Format Picker: Determine the optimal highest available bitrate & resolution
+  const optimalVideo = React.useMemo(() => getOptimalVideoFormat(data.videoFormats), [data.videoFormats]);
+  const optimalAudio = React.useMemo(() => getOptimalAudioFormat(data.audioFormats), [data.audioFormats]);
+
   const [selectedVideo, setSelectedVideo] = useState<VideoFormatOption>(
-    data.videoFormats?.find((v) => v.recommended) || data.videoFormats?.[0] || {
+    optimalVideo || data.videoFormats?.[0] || {
       id: 'v-1080p',
       label: 'Full HD 1080p',
       resolution: '1080p',
@@ -69,7 +123,7 @@ export const MediaHub: React.FC<MediaHubProps> = ({
     }
   );
   const [selectedAudio, setSelectedAudio] = useState<AudioFormatOption>(
-    data.audioFormats?.find((a) => a.recommended) || data.audioFormats?.[0] || {
+    optimalAudio || data.audioFormats?.[0] || {
       id: 'a-320k',
       label: 'Master Studio MP3',
       quality: '320 kbps',
@@ -80,15 +134,15 @@ export const MediaHub: React.FC<MediaHubProps> = ({
     }
   );
 
-  // Synchronize formats whenever data changes (e.g. after a new analysis)
+  // Synchronize formats with Smart Format Picker whenever data changes
   React.useEffect(() => {
-    if (data.videoFormats && data.videoFormats.length > 0) {
-      setSelectedVideo(data.videoFormats.find((v) => v.recommended) || data.videoFormats[0]);
+    if (optimalVideo) {
+      setSelectedVideo(optimalVideo);
     }
-    if (data.audioFormats && data.audioFormats.length > 0) {
-      setSelectedAudio(data.audioFormats.find((a) => a.recommended) || data.audioFormats[0]);
+    if (optimalAudio) {
+      setSelectedAudio(optimalAudio);
     }
-  }, [data]);
+  }, [data, optimalVideo, optimalAudio]);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedSettings, setAdvancedSettings] = useState<AdvancedDownloadSettings>({
@@ -449,12 +503,21 @@ export const MediaHub: React.FC<MediaHubProps> = ({
         <div className="md:col-span-7 flex flex-col justify-between h-full space-y-3">
           <div className="space-y-2">
             {/* Clean unboxed metadata */}
-            <div className="flex items-center gap-2 text-xs text-neutral-400">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
               <span className="font-semibold text-white">{data.platform.name}</span>
               <span aria-hidden="true">·</span>
               <span>{data.author}</span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums">{data.durationFormatted}</span>
+              {optimalVideo && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-[11px] font-medium text-blue-300 shadow-sm animate-pulse">
+                    <Sparkles className="w-3 h-3 text-blue-400" />
+                    <span>Smart Pick: {optimalVideo.resolution} ({optimalVideo.bitrate})</span>
+                  </span>
+                </>
+              )}
             </div>
 
             <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight leading-snug line-clamp-2">
@@ -522,6 +585,7 @@ export const MediaHub: React.FC<MediaHubProps> = ({
             onSelectFormat={setSelectedVideo}
             subtitles={data.subtitles}
             mediaTitle={data.title}
+            optimalFormatId={optimalVideo?.id}
           />
         )}
 
@@ -531,6 +595,7 @@ export const MediaHub: React.FC<MediaHubProps> = ({
             selectedFormat={selectedAudio}
             onSelectFormat={setSelectedAudio}
             onPreviewAudio={() => onPreviewMedia(data)}
+            optimalFormatId={optimalAudio?.id}
           />
         )}
 
@@ -557,6 +622,21 @@ export const MediaHub: React.FC<MediaHubProps> = ({
           />
         )}
       </div>
+
+      {/* Format Matrix & Deep Comparison Table */}
+      {(activeCategory === 'video' || activeCategory === 'audio') && (
+        <FormatComparisonTable
+          videoFormats={data.videoFormats}
+          audioFormats={data.audioFormats}
+          selectedVideo={selectedVideo}
+          selectedAudio={selectedAudio}
+          optimalVideoId={optimalVideo?.id}
+          optimalAudioId={optimalAudio?.id}
+          mediaTitle={data.title}
+          onSelectVideo={setSelectedVideo}
+          onSelectAudio={setSelectedAudio}
+        />
+      )}
 
       {/* 4. Subcategory Advanced Options Drawer */}
       {(activeCategory === 'video' || activeCategory === 'audio') && (

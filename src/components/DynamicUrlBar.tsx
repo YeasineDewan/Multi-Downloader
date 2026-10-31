@@ -96,7 +96,11 @@ export const DynamicUrlBar: React.FC<DynamicUrlBarProps> = ({
 
     loadHistory();
     window.addEventListener('storage', loadHistory);
-    return () => window.removeEventListener('storage', loadHistory);
+    window.addEventListener('search-history-updated', loadHistory);
+    return () => {
+      window.removeEventListener('storage', loadHistory);
+      window.removeEventListener('search-history-updated', loadHistory);
+    };
   }, []);
 
   // Close dropdown on outside click or Escape key
@@ -166,6 +170,7 @@ export const DynamicUrlBar: React.FC<DynamicUrlBarProps> = ({
 
         const updated = [newItem, ...filtered].slice(0, MAX_HISTORY_ITEMS);
         localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(updated));
+        window.dispatchEvent(new Event('search-history-updated'));
         return updated;
       });
     } catch (err) {
@@ -179,6 +184,7 @@ export const DynamicUrlBar: React.FC<DynamicUrlBarProps> = ({
       localStorage.removeItem(SEARCH_HISTORY_KEY);
       setSearchHistory([]);
       setShowHistoryDropdown(false);
+      window.dispatchEvent(new Event('search-history-updated'));
     } catch (err) {
       console.warn('Failed to clear search history:', err);
     }
@@ -190,6 +196,7 @@ export const DynamicUrlBar: React.FC<DynamicUrlBarProps> = ({
       setSearchHistory((prev) => {
         const updated = prev.filter((item) => item.id !== id);
         localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(updated));
+        window.dispatchEvent(new Event('search-history-updated'));
         return updated;
       });
     } catch (err) {

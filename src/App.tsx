@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { DynamicUrlBar } from './components/DynamicUrlBar';
+import { RecentSearches } from './components/RecentSearches';
 import { MediaHub } from './components/MediaHub/MediaHub';
 import { BatchQueueView } from './components/BatchQueueView';
 import { LibraryView } from './components/LibraryView';
@@ -134,12 +135,14 @@ export default function App() {
             id: `hist-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
             url: target,
             domain,
+            title: data.title || target,
             platformId: data.platform?.id || 'generic',
             timestamp: Date.now(),
           },
           ...filtered,
         ].slice(0, 5);
         localStorage.setItem('media_downloader_search_history_v1', JSON.stringify(updated));
+        window.dispatchEvent(new Event('search-history-updated'));
       } catch (e) {
         console.warn('Could not sync history:', e);
       }
@@ -338,6 +341,19 @@ export default function App() {
               detectedPlatform={analyzedMedia?.platform}
             />
           </div>
+
+          {/* Recent Searches section below the search bar in the Hub view */}
+          {activeTab === 'hub' && (
+            <div className="pt-2">
+              <RecentSearches
+                onSelect={(selectedUrl) => {
+                  setUrl(selectedUrl);
+                  handleAnalyze(selectedUrl);
+                }}
+                currentUrl={url}
+              />
+            </div>
+          )}
 
           {errorMessage && (
             <div className="p-3 bg-red-950/40 border border-red-500/20 text-xs text-red-200 rounded-xl max-w-xl mx-auto">

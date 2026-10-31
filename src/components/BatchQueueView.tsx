@@ -93,6 +93,7 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
   const [isZipping, setIsZipping] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [dashboardTab, setDashboardTab] = useState<'speed' | 'eta' | 'tasks'>('speed');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'idle' | 'downloading' | 'completed' | 'paused' | 'failed'>('all');
   const pageSize = 8;
 
   // Drag-and-drop reordering state
@@ -232,8 +233,15 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
     onUpdateQueue(
       queue.map((task) => {
         if (task.id === id) {
+          if (task.status === 'failed') {
+            return { ...task, status: 'downloading', progress: 15, speed: '21.4 MB/s' };
+          }
           const nextStatus = task.status === 'downloading' ? 'paused' : 'downloading';
-          return { ...task, status: nextStatus };
+          return {
+            ...task,
+            status: nextStatus,
+            speed: nextStatus === 'downloading' ? (task.speed || '24.2 MB/s') : '',
+          };
         }
         return task;
       })
@@ -363,7 +371,7 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
     setReorderToast(`⚡ Prioritized to #1 (Next in Queue): "${item.title}"`);
   };
 
-  // Sample tasks seeder for immediate testing of queue reordering
+  // Sample tasks seeder for immediate testing of queue reordering & visual status states
   const handleSeedSampleQueue = () => {
     const samples: DownloadTask[] = [
       {
@@ -377,9 +385,9 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
         format: 'MP4 2160p (4K UHD 60fps)',
         resolution: '3840x2160',
         size: '840.5 MB',
-        progress: 0,
-        status: 'idle',
-        speed: '',
+        progress: 68,
+        status: 'downloading',
+        speed: '24.8 MB/s',
         timestamp: Date.now(),
       },
       {
@@ -393,9 +401,9 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
         format: 'FLAC 24-bit Lossless Studio',
         resolution: '96kHz/24-bit',
         size: '42.8 MB',
-        progress: 0,
-        status: 'idle',
-        speed: '',
+        progress: 100,
+        status: 'completed',
+        speed: 'Done',
         timestamp: Date.now() - 1000,
       },
       {
@@ -425,9 +433,9 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
         format: 'MP3 320 kbps Studio',
         resolution: '320 kbps',
         size: '14.2 MB',
-        progress: 0,
-        status: 'idle',
-        speed: '',
+        progress: 28,
+        status: 'failed',
+        speed: 'Connection dropped',
         timestamp: Date.now() - 3000,
       },
     ];
@@ -469,12 +477,109 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(queue.length / pageSize));
+  const statusCounts = useMemo(() => {
+    const counts = { all: queue.length, idle: 0, downloading: 0, completed: 0, paused: 0, failed: 0 };
+    queue.forEach((t) => {
+      if ((counts as any)[t.status] !== undefined) {
+        (counts as any)[t.status] += 1;
+      }
+    });
+    return counts;
+  }, [queue]);
+
+  const filteredQueue = useMemo(() => {
+    if (statusFilter === 'all') return queue;
+    return queue.filter((t) => t.status === statusFilter);
+  }, [queue, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredQueue.length / pageSize));
   const validPage = Math.min(Math.max(1, currentPage), totalPages);
   const paginatedQueue = useMemo(() => {
     const start = (validPage - 1) * pageSize;
-    return queue.slice(start, start + pageSize);
-  }, [queue, validPage, pageSize]);
+    return filteredQueue.slice(start, start + pageSize);
+  }, [filteredQueue, validPage, pageSize]);
+
+  // Helper function to render prominent visual status badges with scan-friendly icons
+  const renderTaskStatusBadge = (status: DownloadTask['status'], speed?: string) => {
+    switch (status) {
+      case 'downloading':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-blue-500/15 text-blue-300 border border-blue-500/30 shadow-[0_0_8px_rgba(59,130,246,0.2)] animate-pulse">
+            <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" />
+            <span>Downloading</span>
+            {speed && speed !== 'Done' && (
+              <span className="font-mono text-blue-200 hidden xs:inline">· {speed}</span>
+            )}
+          </span>
+        );
+      case 'completed':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.2)]">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Completed</span>
+          </span>
+        );
+      case 'failed':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-[0_0_8px_rgba(244,63,94,0.2)]">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span>Failed</span>
+          </span>
+        );
+      case 'paused':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <Pause className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Paused</span>
+          </span>
+        );
+      case 'idle':
+      default:
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-neutral-800/80 text-neutral-300 border border-white/10">
+            <Clock className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+            <span>Waiting in Queue</span>
+          </span>
+        );
+    }
+  };
+
+  // Helper function to render thumbnail icon overlay
+  const renderThumbnailStatusIcon = (status: DownloadTask['status']) => {
+    switch (status) {
+      case 'downloading':
+        return (
+          <div className="p-1 rounded-md bg-blue-950/90 border border-blue-400/40 text-blue-400 shadow-md">
+            <Loader2 className="w-3 h-3 animate-spin" />
+          </div>
+        );
+      case 'completed':
+        return (
+          <div className="p-1 rounded-md bg-emerald-950/90 border border-emerald-400/40 text-emerald-400 shadow-md">
+            <CheckCircle2 className="w-3 h-3" />
+          </div>
+        );
+      case 'failed':
+        return (
+          <div className="p-1 rounded-md bg-rose-950/90 border border-rose-400/40 text-rose-400 shadow-md">
+            <AlertCircle className="w-3 h-3" />
+          </div>
+        );
+      case 'paused':
+        return (
+          <div className="p-1 rounded-md bg-amber-950/90 border border-amber-400/40 text-amber-400 shadow-md">
+            <Pause className="w-3 h-3" />
+          </div>
+        );
+      case 'idle':
+      default:
+        return (
+          <div className="p-1 rounded-md bg-black/80 border border-white/10 text-neutral-400 shadow-md">
+            <Clock className="w-3 h-3" />
+          </div>
+        );
+    }
+  };
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -911,7 +1016,7 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-neutral-400 px-1 font-mono">
           <div className="flex items-center gap-2">
-            <span>Active & Queued Tasks ({queue.length})</span>
+            <span>Tasks ({filteredQueue.length}{statusFilter !== 'all' ? ` of ${queue.length}` : ''})</span>
             {queue.length > 1 && (
               <span className="text-[11px] text-cyan-400/90 font-sans hidden sm:inline flex items-center gap-1">
                 · Drag items or use <span className="font-mono text-cyan-300">⚡ / ↑ / ↓</span> to prioritize download order
@@ -932,6 +1037,109 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
             {totalPages > 1 && <span>Page {validPage} of {totalPages}</span>}
           </div>
         </div>
+
+        {/* Visual Status Filter Chips */}
+        {queue.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-neutral-950/70 rounded-2xl border border-white/[0.06] text-xs">
+            <button
+              onClick={() => {
+                setStatusFilter('all');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === 'all'
+                  ? 'bg-neutral-800 text-white shadow-sm'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-neutral-400" />
+              <span>All ({queue.length})</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setStatusFilter('downloading');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === 'downloading'
+                  ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40 shadow-sm'
+                  : 'text-neutral-400 hover:text-blue-300'
+              }`}
+            >
+              <Loader2
+                className={`w-3.5 h-3.5 text-blue-400 ${
+                  statusCounts.downloading > 0 ? 'animate-spin' : ''
+                }`}
+              />
+              <span>Downloading ({statusCounts.downloading})</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setStatusFilter('idle');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === 'idle'
+                  ? 'bg-neutral-800 text-neutral-200 border border-white/10 shadow-sm'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 text-neutral-400" />
+              <span>Waiting ({statusCounts.idle})</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setStatusFilter('completed');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                statusFilter === 'completed'
+                  ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                  : 'text-neutral-400 hover:text-emerald-300'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Completed ({statusCounts.completed})</span>
+            </button>
+
+            {statusCounts.failed > 0 && (
+              <button
+                onClick={() => {
+                  setStatusFilter('failed');
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                  statusFilter === 'failed'
+                    ? 'bg-rose-600/30 text-rose-300 border border-rose-500/40 shadow-sm'
+                    : 'text-neutral-400 hover:text-rose-300'
+                }`}
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                <span>Failed ({statusCounts.failed})</span>
+              </button>
+            )}
+
+            {statusCounts.paused > 0 && (
+              <button
+                onClick={() => {
+                  setStatusFilter('paused');
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-xl font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                  statusFilter === 'paused'
+                    ? 'bg-amber-600/30 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'text-neutral-400 hover:text-amber-300'
+                }`}
+              >
+                <Pause className="w-3.5 h-3.5 text-amber-400" />
+                <span>Paused ({statusCounts.paused})</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {queue.length === 0 ? (
           <div className="p-12 text-center text-xs text-neutral-500 bg-neutral-950/40 rounded-2xl border border-white/[0.05] space-y-3">
@@ -1011,12 +1219,16 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                     />
+                    {/* Visual status icon on top-left of thumbnail */}
+                    <div className="absolute top-1 left-1">
+                      {renderThumbnailStatusIcon(task.status)}
+                    </div>
                     <div className="absolute bottom-1 right-1 px-1 rounded bg-black/80 text-[8px] font-mono text-white">
                       {task.format.toUpperCase()}
                     </div>
                   </div>
 
-                  <div className="min-w-0 flex-1 space-y-1">
+                  <div className="min-w-0 flex-1 space-y-1.5">
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-semibold text-white truncate mr-2" title={task.title}>
                         {task.title}
@@ -1026,23 +1238,50 @@ export const BatchQueueView: React.FC<BatchQueueViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Progress bar */}
+                    {/* Progress bar with status-specific tint */}
                     <div className="w-full h-1.5 bg-neutral-800 rounded-full overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 rounded-full ${
                           task.status === 'completed'
                             ? 'bg-emerald-500'
                             : task.status === 'downloading'
-                            ? 'bg-blue-500'
+                            ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
+                            : task.status === 'failed'
+                            ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]'
+                            : task.status === 'paused'
+                            ? 'bg-amber-500'
                             : 'bg-neutral-600'
                         }`}
-                        style={{ width: `${task.progress}%` }}
+                        style={{ width: `${task.status === 'idle' ? 0 : task.progress}%` }}
                       />
                     </div>
 
-                    <div className="flex items-center justify-between text-[10px] text-neutral-400 font-mono">
-                      <span className="capitalize">{task.status}</span>
-                      <span>{task.speed || (task.status === 'completed' ? '100%' : '')}</span>
+                    {/* Status Badge with Visual Icon and Action */}
+                    <div className="flex items-center justify-between text-[11px] font-mono">
+                      <div className="flex items-center gap-2">
+                        {renderTaskStatusBadge(task.status, task.speed)}
+                        {task.status === 'failed' && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleTaskStatus(task.id)}
+                            className="text-[10px] text-rose-300 hover:text-white underline font-sans flex items-center gap-1 cursor-pointer"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            <span>Retry</span>
+                          </button>
+                        )}
+                      </div>
+                      <span className="text-neutral-400 tabular-nums text-[10px]">
+                        {task.status === 'completed'
+                          ? '100% Downloaded'
+                          : task.status === 'downloading'
+                          ? `${task.progress}%`
+                          : task.status === 'paused'
+                          ? `Paused at ${task.progress}%`
+                          : task.status === 'failed'
+                          ? 'Interrupted'
+                          : 'Ready in queue'}
+                      </span>
                     </div>
                   </div>
                 </div>
